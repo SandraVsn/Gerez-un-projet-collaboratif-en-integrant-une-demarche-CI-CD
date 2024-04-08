@@ -1,20 +1,69 @@
-name: sonar cloud
+name: SonarCloud
 on:
   push:
     branches: [main, develop, feat/*, fix/*]
   pull_request:
     types: [opened, synchronize, reopened]
-
 jobs:
-  sonar-front-end:
-    name: SonarCloud
+  build:
+    name: Build and analyze
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: ./front
+        run: npm ci
+      
+      - name: Run tests and reports
+        working-directory: ./front
+        run:  npm test -- --watch=false --browsers=ChromeHeadless --code-coverage
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+        working-directory: ./back
+      
+      - name: Run tests and generate jacoco report
+        run: mvn test jacoco:report
+        working-directory: ./back
+      
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+      - name: Build and analyze
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        working-directory: ./back
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=SandraVsn_Gerez-un-projet-collaboratif-en-integrant-une-demarche-CI-CD2
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: .
